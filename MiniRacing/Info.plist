@@ -1,12 +1,23 @@
+
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+
     <key>CFBundleDisplayName</key>
     <string>Mini Racing</string>
 
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+
     <key>CFBundleIdentifier</key>
-    <string>com.ismayil.miniracing</string>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
 
     <key>CFBundleName</key>
     <string>MiniRacing</string>
@@ -14,11 +25,11 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
 
-    <key>CFBundleVersion</key>
-    <string>1</string>
-
     <key>CFBundleShortVersionString</key>
     <string>1.0</string>
+
+    <key>CFBundleVersion</key>
+    <string>1</string>
 
     <key>LSRequiresIPhoneOS</key>
     <true/>
@@ -26,21 +37,28 @@
     <key>UILaunchScreen</key>
     <dict/>
 
-    <key>UIRequiresFullScreen</key>
-    <true/>
-
     <key>UISupportedInterfaceOrientations</key>
     <array>
         <string>UIInterfaceOrientationLandscapeLeft</string>
         <string>UIInterfaceOrientationLandscapeRight</string>
     </array>
 
+    <key>UIRequiresFullScreen</key>
+    <true/>
+
+    <key>UIViewControllerBasedStatusBarAppearance</key>
+    <true/>
+
     <key>NSLocalNetworkUsageDescription</key>
-    <string>Mini Racing uses your local Wi-Fi network to connect players in multiplayer races.</string>
+    <string>Mini Racing uses your local Wi-Fi network to connect with other players.</string>
 
     <key>NSBonjourServices</key>
     <array>
         <string>_minirace._tcp</string>
     </array>
+
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
+
 </dict>
 </plist>

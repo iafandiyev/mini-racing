@@ -1,14 +1,20 @@
+
 import SpriteKit
 import UIKit
 
 private final class RacingCar: SKNode {
-
-    let body: SKShapeNode
-    let window: SKShapeNode
+    private let body: SKShapeNode
+    private let window: SKShapeNode
 
     init(color: UIColor) {
-        body = SKShapeNode(rectOf: CGSize(width: 25, height: 43), cornerRadius: 7)
-        window = SKShapeNode(rectOf: CGSize(width: 15, height: 13), cornerRadius: 3)
+        body = SKShapeNode(
+            rectOf: CGSize(width: 25, height: 43),
+            cornerRadius: 7
+        )
+        window = SKShapeNode(
+            rectOf: CGSize(width: 15, height: 13),
+            cornerRadius: 3
+        )
 
         super.init()
 
@@ -38,15 +44,11 @@ final class GameScene: SKScene, MultiplayerManagerDelegate {
     }
 
     private var mode: GameMode = .menu
-
     private let multiplayer = MultiplayerManager.shared
 
     private var playerCar: RacingCar?
     private var remoteCars: [String: RacingCar] = [:]
     private var botCars: [RacingCar] = []
-
-    private var menuNodes: [SKNode] = []
-    private var controlNodes: [SKNode] = []
 
     private var statusLabel: SKLabelNode?
     private var lapLabel: SKLabelNode?
@@ -58,12 +60,15 @@ final class GameScene: SKScene, MultiplayerManagerDelegate {
 
     private var steering: CGFloat = 0
     private var throttle: CGFloat = 0
+    private var activeTouches: [ObjectIdentifier: String] = [:]
 
     private var lastUpdate: TimeInterval = 0
     private var lastNetworkUpdate: TimeInterval = 0
 
     private var lapCount = 0
-    private var lastCheckpointY: CGFloat = 0
+    private var previousTrackAngle: CGFloat?
+    private var completedTrackAngle: CGFloat = 0
+
     private var raceStarted = false
 
     private var trackCenter = CGPoint.zero
@@ -90,151 +95,159 @@ final class GameScene: SKScene, MultiplayerManagerDelegate {
 
         if mode == .menu {
             showMenu()
-        } else {
-            layoutGame()
+            return
         }
+
+        if oldSize.width > 0, oldSize.height > 0 {
+            carPosition.x *= size.width / oldSize.width
+            carPosition.y *= size.height / oldSize.height
+        }
+
+        layoutGame()
     }
 
-    // MARK: - Menu
+    // MARK: Helpers
+
+    private func makeLabel(
+        _ text: String,
+        size: CGFloat,
+        color: UIColor = .white
+    ) -> SKLabelNode {
+        let label = SKLabelNode(fontNamed: "AvenirNext-Bold")
+        label.text = text
+        label.fontSize = size
+        label.fontColor = color
+        label.verticalAlignmentMode = .center
+        label.horizontalAlignmentMode = .center
+        return label
+    }
 
     private func clearScene() {
         removeAllChildren()
-        menuNodes.removeAll()
-        controlNodes.removeAll()
+
+        playerCar = nil
         remoteCars.removeAll()
         botCars.removeAll()
 
-        playerCar = nil
         statusLabel = nil
         lapLabel = nil
         speedLabel = nil
+
+        activeTouches.removeAll()
+        steering = 0
+        throttle = 0
     }
+
+    // MARK: Menu
 
     private func showMenu() {
         mode = .menu
         raceStarted = false
 
-        clearScene()
         multiplayer.disconnect()
+        clearScene()
 
         backgroundColor = backgroundColorGame
 
         let title = makeLabel(
-            text: "MINI RACING",
-            size: min(size.width * 0.075, 48),
-            color: .white
+            "MINI RACING",
+            size: min(size.width * 0.075, 48)
         )
-
         title.position = CGPoint(
             x: size.width / 2,
-            y: size.height * 0.77
+            y: size.height * 0.78
         )
-
         addChild(title)
 
         let subtitle = makeLabel(
-            text: "2D ARCADE RACING",
+            "2D ARCADE RACING",
             size: 13,
             color: UIColor(white: 0.65, alpha: 1)
         )
-
         subtitle.position = CGPoint(
             x: size.width / 2,
             y: size.height * 0.68
         )
-
         addChild(subtitle)
 
         addMenuButton(
-            title: "PLAY OFFLINE",
+            "PLAY OFFLINE",
             name: "offline",
-            position: CGPoint(x: size.width / 2, y: size.height * 0.52),
-            color: UIColor(red: 0.12, green: 0.65, blue: 0.95, alpha: 1)
+            y: 0.53,
+            color: UIColor(red: 0.12, green: 0.55, blue: 0.9, alpha: 1)
         )
 
         addMenuButton(
-            title: "HOST GAME",
+            "HOST GAME",
             name: "host",
-            position: CGPoint(x: size.width / 2, y: size.height * 0.38),
-            color: UIColor(red: 0.15, green: 0.72, blue: 0.48, alpha: 1)
+            y: 0.39,
+            color: UIColor(red: 0.12, green: 0.62, blue: 0.4, alpha: 1)
         )
 
         addMenuButton(
-            title: "JOIN GAME",
+            "JOIN GAME",
             name: "join",
-            position: CGPoint(x: size.width / 2, y: size.height * 0.24),
-            color: UIColor(red: 0.55, green: 0.38, blue: 0.9, alpha: 1)
+            y: 0.25,
+            color: UIColor(red: 0.48, green: 0.32, blue: 0.82, alpha: 1)
         )
 
         let footer = makeLabel(
-            text: "MINI RACING  •  LOCAL MULTIPLAYER",
+            "LOCAL WI-FI MULTIPLAYER",
             size: 10,
-            color: UIColor(white: 0.45, alpha: 1)
+            color: UIColor(white: 0.5, alpha: 1)
         )
-
         footer.position = CGPoint(
             x: size.width / 2,
             y: size.height * 0.08
         )
-
         addChild(footer)
-
-        let status = makeLabel(
-            text: "",
-            size: 12,
-            color: .white
-        )
-
-        status.position = CGPoint(
-            x: size.width / 2,
-            y: size.height * 0.15
-        )
-
-        statusLabel = status
-        addChild(status)
     }
 
     private func addMenuButton(
-        title: String,
+        _ title: String,
         name: String,
-        position: CGPoint,
+        y: CGFloat,
         color: UIColor
     ) {
+        let buttonSize = CGSize(
+            width: min(size.width * 0.44, 270),
+            height: min(size.height * 0.11, 48)
+        )
+
         let button = SKShapeNode(
-            rectOf: CGSize(
-                width: min(size.width * 0.42, 260),
-                height: min(size.height * 0.105, 48)
-            ),
+            rectOf: buttonSize,
             cornerRadius: 12
         )
-
         button.name = name
+        button.position = CGPoint(
+            x: size.width / 2,
+            y: size.height * y
+        )
         button.fillColor = color
-        button.strokeColor = UIColor(white: 1, alpha: 0.2)
+        button.strokeColor = UIColor(white: 1, alpha: 0.25)
         button.lineWidth = 1
-        button.position = position
         addChild(button)
 
-        let label = makeLabel(
-            text: title,
-            size: 14,
-            color: .white
-        )
-
+        let label = makeLabel(title, size: 14)
         label.name = name
-        label.position = position
+        label.position = button.position
         addChild(label)
     }
 
-    // MARK: - Game setup
+    // MARK: Game setup
 
     private func startGame(online: Bool) {
         mode = online ? .online : .offline
         raceStarted = true
 
         multiplayer.stopDiscovery()
-
         clearScene()
+
+        lapCount = 0
+        completedTrackAngle = 0
+        previousTrackAngle = nil
+        lastUpdate = 0
+        lastNetworkUpdate = 0
 
         backgroundColor = UIColor(
             red: 0.12,
@@ -251,28 +264,30 @@ final class GameScene: SKScene, MultiplayerManagerDelegate {
     }
 
     private func layoutGame() {
-        guard mode != .menu else {
-            return
-        }
+        guard mode != .menu else { return }
 
-        removeChildren(in: children.filter {
-            $0.name == "track" ||
-            $0.name == "hud" ||
-            $0.name == "controls"
-        })
+        childNode(withName: "trackRoot")?.removeFromParent()
+        childNode(withName: "hudRoot")?.removeFromParent()
+        childNode(withName: "controlsRoot")?.removeFromParent()
 
         trackCenter = CGPoint(
             x: size.width / 2,
             y: size.height / 2
         )
 
-        trackRadiusX = size.width * 0.34
-        trackRadiusY = size.height * 0.31
+        trackRadiusX = max(90, min(size.width * 0.33, size.width / 2 - 45))
+        trackRadiusY = max(55, min(size.height * 0.28, size.height / 2 - 45))
 
         drawTrack()
 
         if playerCar == nil {
-            let car = RacingCar(color: .systemBlue)
+            let car = RacingCar(color: UIColor(
+                red: 0.1,
+                green: 0.48,
+                blue: 1,
+                alpha: 1
+            ))
+
             playerCar = car
             addChild(car)
 
@@ -281,7 +296,7 @@ final class GameScene: SKScene, MultiplayerManagerDelegate {
                 y: trackCenter.y - trackRadiusY
             )
 
-            carAngle = .pi / 2
+            carAngle = 0
             carVelocity = .zero
         }
 
@@ -293,64 +308,60 @@ final class GameScene: SKScene, MultiplayerManagerDelegate {
     }
 
     private func drawTrack() {
-        let track = SKNode()
-        track.name = "track"
-        track.zPosition = -10
+        let root = SKNode()
+        root.name = "trackRoot"
+        root.zPosition = -10
 
-        let outer = CGMutablePath()
-        outer.addEllipse(in: CGRect(
+        let outerRect = CGRect(
             x: trackCenter.x - trackRadiusX - 28,
             y: trackCenter.y - trackRadiusY - 28,
             width: (trackRadiusX + 28) * 2,
             height: (trackRadiusY + 28) * 2
-        ))
+        )
 
-        let outerShape = SKShapeNode(path: outer)
-        outerShape.strokeColor = UIColor(white: 0.12, alpha: 1)
-        outerShape.lineWidth = 30
-        outerShape.fillColor = .clear
-        track.addChild(outerShape)
+        let outer = SKShapeNode(ellipseIn: outerRect)
+        outer.strokeColor = UIColor(white: 0.1, alpha: 1)
+        outer.lineWidth = 12
+        outer.fillColor = .clear
+        root.addChild(outer)
 
-        let road = CGMutablePath()
-        road.addEllipse(in: CGRect(
+        let roadRect = CGRect(
             x: trackCenter.x - trackRadiusX,
             y: trackCenter.y - trackRadiusY,
             width: trackRadiusX * 2,
             height: trackRadiusY * 2
-        ))
+        )
 
-        let roadShape = SKShapeNode(path: road)
-        roadShape.strokeColor = UIColor(
+        let road = SKShapeNode(ellipseIn: roadRect)
+        road.strokeColor = UIColor(
             red: 0.22,
             green: 0.24,
             blue: 0.27,
             alpha: 1
         )
-        roadShape.lineWidth = 55
-        roadShape.fillColor = .clear
-        track.addChild(roadShape)
+        road.lineWidth = 55
+        road.fillColor = .clear
+        root.addChild(road)
 
-        let inner = CGMutablePath()
-        inner.addEllipse(in: CGRect(
+        let innerRect = CGRect(
             x: trackCenter.x - trackRadiusX + 28,
             y: trackCenter.y - trackRadiusY + 28,
-            width: (trackRadiusX - 28) * 2,
-            height: (trackRadiusY - 28) * 2
-        ))
+            width: max(1, (trackRadiusX - 28) * 2),
+            height: max(1, (trackRadiusY - 28) * 2)
+        )
 
-        let innerShape = SKShapeNode(path: inner)
-        innerShape.strokeColor = UIColor(white: 0.12, alpha: 1)
-        innerShape.lineWidth = 3
-        innerShape.fillColor = UIColor(
+        let inner = SKShapeNode(ellipseIn: innerRect)
+        inner.fillColor = UIColor(
             red: 0.12,
             green: 0.42,
             blue: 0.22,
             alpha: 1
         )
-        track.addChild(innerShape)
+        inner.strokeColor = .clear
+        root.addChild(inner)
 
         let startLine = SKShapeNode(
-            rectOf: CGSize(width: 5, height: 50)
+            rectOf: CGSize(width: 48, height: 5)
         )
         startLine.fillColor = .white
         startLine.strokeColor = .clear
@@ -358,226 +369,228 @@ final class GameScene: SKScene, MultiplayerManagerDelegate {
             x: trackCenter.x,
             y: trackCenter.y - trackRadiusY
         )
-        track.addChild(startLine)
+        root.addChild(startLine)
 
-        addChild(track)
+        addChild(root)
     }
 
+    // MARK: HUD
+
     private func addHUD() {
-        let lap = makeLabel(
-            text: "LAP 0 / 3",
-            size: 15,
-            color: .white
-        )
+        let root = SKNode()
+        root.name = "hudRoot"
+        root.zPosition = 30
+        addChild(root)
 
+        let lap = makeLabel("LAP 0 / 3", size: 14)
         lap.horizontalAlignmentMode = .left
-        lap.position = CGPoint(
-            x: 20,
-            y: size.height - 30
-        )
-        lap.name = "hud"
+        lap.position = CGPoint(x: 18, y: size.height - 25)
         lapLabel = lap
-        addChild(lap)
+        root.addChild(lap)
 
-        let speed = makeLabel(
-            text: "SPEED 0",
-            size: 13,
-            color: .white
-        )
-
+        let speed = makeLabel("SPEED 0", size: 13)
         speed.horizontalAlignmentMode = .right
-        speed.position = CGPoint(
-            x: size.width - 20,
-            y: size.height - 30
-        )
-        speed.name = "hud"
+        speed.position = CGPoint(x: size.width - 18, y: size.height - 25)
         speedLabel = speed
-        addChild(speed)
+        root.addChild(speed)
 
-        let back = makeLabel(
-            text: "MENU",
-            size: 12,
-            color: .white
+        let status = makeLabel(
+            mode == .online ? "CONNECTING..." : "OFFLINE RACE",
+            size: 10,
+            color: UIColor(white: 0.85, alpha: 1)
         )
+        status.position = CGPoint(
+            x: size.width / 2,
+            y: size.height - 25
+        )
+        statusLabel = status
+        root.addChild(status)
 
+        let back = makeLabel("MENU", size: 11)
         back.name = "back"
         back.position = CGPoint(
             x: size.width / 2,
-            y: size.height - 30
+            y: size.height - 48
         )
-        back.name = "back"
-        addChild(back)
+        root.addChild(back)
     }
+
+    // MARK: Controls
 
     private func addControls() {
-        let left = addControl(
+        let root = SKNode()
+        root.name = "controlsRoot"
+        root.zPosition = 50
+        addChild(root)
+
+        let shortSide = min(size.width, size.height)
+        let buttonWidth = min(shortSide * 0.22, 82)
+        let buttonHeight = min(shortSide * 0.18, 66)
+
+        addControl(
+            to: root,
             name: "left",
             title: "◀",
-            position: CGPoint(x: size.width * 0.12, y: size.height * 0.19)
+            position: CGPoint(x: size.width * 0.12, y: size.height * 0.19),
+            width: buttonWidth,
+            height: buttonHeight
         )
 
-        let right = addControl(
+        addControl(
+            to: root,
             name: "right",
             title: "▶",
-            position: CGPoint(x: size.width * 0.27, y: size.height * 0.19)
+            position: CGPoint(x: size.width * 0.25, y: size.height * 0.19),
+            width: buttonWidth,
+            height: buttonHeight
         )
 
-        let gas = addControl(
-            name: "gas",
-            title: "GAS",
-            position: CGPoint(x: size.width * 0.86, y: size.height * 0.2)
-        )
-
-        let brake = addControl(
+        addControl(
+            to: root,
             name: "brake",
             title: "BRAKE",
-            position: CGPoint(x: size.width * 0.72, y: size.height * 0.13)
+            position: CGPoint(x: size.width * 0.75, y: size.height * 0.15),
+            width: buttonWidth,
+            height: buttonHeight
         )
 
-        controlNodes = [left, right, gas, brake]
+        addControl(
+            to: root,
+            name: "gas",
+            title: "GAS",
+            position: CGPoint(x: size.width * 0.88, y: size.height * 0.23),
+            width: buttonWidth,
+            height: buttonHeight
+        )
     }
 
-    @discardableResult
     private func addControl(
+        to root: SKNode,
         name: String,
         title: String,
-        position: CGPoint
-    ) -> SKNode {
-        let width = min(size.width * 0.12, 85)
-        let height = min(size.height * 0.22, 65)
-
+        position: CGPoint,
+        width: CGFloat,
+        height: CGFloat
+    ) {
         let button = SKShapeNode(
             rectOf: CGSize(width: width, height: height),
             cornerRadius: 13
         )
-
         button.name = name
         button.position = position
         button.fillColor = UIColor(white: 1, alpha: 0.18)
-        button.strokeColor = UIColor(white: 1, alpha: 0.35)
+        button.strokeColor = UIColor(white: 1, alpha: 0.4)
         button.lineWidth = 1
-        button.zPosition = 20
-        addChild(button)
+        root.addChild(button)
 
-        let label = makeLabel(
-            text: title,
-            size: 16,
-            color: .white
-        )
-
+        let label = makeLabel(title, size: 14)
         label.name = name
         label.position = position
-        label.zPosition = 21
-        addChild(label)
-
-        return button
+        root.addChild(label)
     }
 
-    // MARK: - Bots
+    // MARK: Offline bots
 
     private func addBotCars() {
-        let colors: [UIColor] = [
-            .systemRed,
-            .systemYellow
-        ]
+        let colors: [UIColor] = [.red, .yellow]
 
         for (index, color) in colors.enumerated() {
             let bot = RacingCar(color: color)
-
             let offset = CGFloat(index + 1) * 32
 
             bot.position = CGPoint(
                 x: trackCenter.x + offset,
                 y: trackCenter.y - trackRadiusY
             )
-
             bot.zPosition = 2
+
             botCars.append(bot)
             addChild(bot)
 
-            let action = SKAction.repeatForever(
-                SKAction.sequence([
-                    SKAction.moveBy(
-                        x: 0,
-                        y: trackRadiusY * 1.6,
-                        duration: 3.5 + Double(index)
-                    ),
-                    SKAction.moveBy(
-                        x: -offset * 2,
-                        y: 0,
-                        duration: 2
-                    ),
-                    SKAction.moveBy(
-                        x: 0,
-                        y: -trackRadiusY * 1.6,
-                        duration: 3.5 + Double(index)
-                    ),
-                    SKAction.moveBy(
-                        x: offset * 2,
-                        y: 0,
-                        duration: 2
-                    )
-                ])
-            )
+            let duration = 3.5 + Double(index)
 
-            bot.run(action)
+            let path = SKAction.sequence([
+                SKAction.moveBy(
+                    x: trackRadiusX * 0.75,
+                    y: trackRadiusY,
+                    duration: duration
+                ),
+                SKAction.moveBy(
+                    x: -trackRadiusX * 1.5,
+                    y: 0,
+                    duration: duration
+                ),
+                SKAction.moveBy(
+                    x: trackRadiusX * 0.75,
+                    y: -trackRadiusY,
+                    duration: duration
+                ),
+                SKAction.moveBy(
+                    x: trackRadiusX * 0.0,
+                    y: 0,
+                    duration: 0.1
+                )
+            ])
+
+            bot.run(SKAction.repeatForever(path))
         }
     }
 
-    // MARK: - Touch controls
+    // MARK: Touch handling
+
+    private func controlName(at point: CGPoint) -> String? {
+        for node in nodes(at: point) {
+            var current: SKNode? = node
+
+            while let item = current {
+                if let name = item.name {
+                    return name
+                }
+                current = item.parent
+            }
+        }
+
+        return nil
+    }
 
     override func touchesBegan(
         _ touches: Set<UITouch>,
         with event: UIEvent?
     ) {
         for touch in touches {
-            let location = touch.location(in: self)
-            let nodes = nodes(at: location)
+            let point = touch.location(in: self)
+            guard let name = controlName(at: point) else { continue }
 
-            for node in nodes {
-                guard let name = node.name else {
-                    continue
+            if mode == .menu {
+                switch name {
+                case "offline":
+                    startGame(online: false)
+
+                case "host":
+                    startGame(online: true)
+                    statusLabel?.text = "WAITING FOR PLAYERS..."
+                    multiplayer.startHosting()
+
+                case "join":
+                    startGame(online: true)
+                    statusLabel?.text = "SEARCHING..."
+                    multiplayer.startJoining()
+
+                default:
+                    break
                 }
 
-                if mode == .menu {
-                    switch name {
-                    case "offline":
-                        startGame(online: false)
+                continue
+            }
 
-                    case "host":
-                        startGame(online: true)
-                        multiplayer.startHosting()
-                        statusLabel?.text = "Waiting for players..."
+            if name == "back" {
+                showMenu()
+                return
+            }
 
-                    case "join":
-                        startGame(online: true)
-                        multiplayer.startJoining()
-                        statusLabel?.text = "Searching for games..."
-
-                    default:
-                        break
-                    }
-                } else {
-                    switch name {
-                    case "left":
-                        steering = 1
-
-                    case "right":
-                        steering = -1
-
-                    case "gas":
-                        throttle = 1
-
-                    case "brake":
-                        throttle = -0.6
-
-                    case "back":
-                        showMenu()
-
-                    default:
-                        break
-                    }
-                }
+            if ["left", "right", "gas", "brake"].contains(name) {
+                activeTouches[ObjectIdentifier(touch)] = name
+                updateControlsState()
             }
         }
     }
@@ -586,77 +599,89 @@ final class GameScene: SKScene, MultiplayerManagerDelegate {
         _ touches: Set<UITouch>,
         with event: UIEvent?
     ) {
-        steering = 0
-        throttle = 0
+        for touch in touches {
+            activeTouches.removeValue(forKey: ObjectIdentifier(touch))
+        }
+
+        updateControlsState()
     }
 
     override func touchesCancelled(
         _ touches: Set<UITouch>,
         with event: UIEvent?
     ) {
-        steering = 0
-        throttle = 0
+        for touch in touches {
+            activeTouches.removeValue(forKey: ObjectIdentifier(touch))
+        }
+
+        updateControlsState()
     }
 
-    // MARK: - Game loop
+    private func updateControlsState() {
+        let values = Array(activeTouches.values)
+
+        steering = values.contains("left") ? 1 : 0
+        if values.contains("right") {
+            steering = -1
+        }
+
+        throttle = values.contains("gas") ? 1 : 0
+        if values.contains("brake") {
+            throttle = -0.6
+        }
+    }
+
+    // MARK: Update loop
 
     override func update(_ currentTime: TimeInterval) {
-        guard mode != .menu, raceStarted else {
-            return
-        }
+        guard raceStarted, mode != .menu else { return }
 
-        var deltaTime = currentTime - lastUpdate
+        var delta = currentTime - lastUpdate
         lastUpdate = currentTime
 
-        if deltaTime <= 0 {
-            return
-        }
+        if delta <= 0 { return }
+        delta = min(delta, 1.0 / 30.0)
 
-        deltaTime = min(deltaTime, 1.0 / 30.0)
-
-        updatePlayer(deltaTime: CGFloat(deltaTime))
-
-        if mode == .online {
-            if currentTime - lastNetworkUpdate > 0.08 {
-                multiplayer.sendPosition(
-                    x: carPosition.x,
-                    y: carPosition.y,
-                    angle: carAngle
-                )
-
-                lastNetworkUpdate = currentTime
-            }
-        }
-
+        updatePlayer(delta: CGFloat(delta))
+        updateLapProgress()
         updateHUD()
-        updateLaps()
+
+        if mode == .online,
+           currentTime - lastNetworkUpdate >= 0.08 {
+            multiplayer.sendPosition(
+                x: carPosition.x / max(size.width, 1),
+                y: carPosition.y / max(size.height, 1),
+                angle: carAngle
+            )
+            lastNetworkUpdate = currentTime
+        }
     }
 
-    private func updatePlayer(deltaTime: CGFloat) {
+    private func updatePlayer(delta: CGFloat) {
         let speed = sqrt(
             carVelocity.dx * carVelocity.dx +
             carVelocity.dy * carVelocity.dy
         )
 
         if speed > 8 {
-            carAngle += steering * deltaTime * min(speed / 45, 2.4)
+            carAngle += steering * delta * min(speed / 45, 2.4)
         }
 
         let acceleration: CGFloat = 190
 
-        carVelocity.dx += cos(carAngle) * throttle * acceleration * deltaTime
-        carVelocity.dy += sin(carAngle) * throttle * acceleration * deltaTime
+        carVelocity.dx += cos(carAngle) * throttle * acceleration * delta
+        carVelocity.dy += sin(carAngle) * throttle * acceleration * delta
 
         let drag: CGFloat = throttle == 0 ? 0.985 : 0.996
-
         carVelocity.dx *= drag
         carVelocity.dy *= drag
 
-        let maxSpeed: CGFloat = 260
         let currentSpeed = sqrt(
             carVelocity.dx * carVelocity.dx +
             carVelocity.dy * carVelocity.dy
         )
+
+        let maxSpeed: CGFloat = 260
 
         if currentSpeed > maxSpeed {
             let factor = maxSpeed / currentSpeed
@@ -664,12 +689,11 @@ final class GameScene: SKScene, MultiplayerManagerDelegate {
             carVelocity.dy *= factor
         }
 
-        carPosition.x += carVelocity.dx * deltaTime
-        carPosition.y += carVelocity.dy * deltaTime
+        carPosition.x += carVelocity.dx * delta
+        carPosition.y += carVelocity.dy * delta
 
         let dx = (carPosition.x - trackCenter.x) / max(trackRadiusX, 1)
         let dy = (carPosition.y - trackCenter.y) / max(trackRadiusY, 1)
-
         let distance = sqrt(dx * dx + dy * dy)
 
         if distance > 1.13 {
@@ -686,102 +710,91 @@ final class GameScene: SKScene, MultiplayerManagerDelegate {
         playerCar?.zRotation = carAngle
     }
 
-    private func updateHUD() {
-        let speed = Int(
-            sqrt(
-                carVelocity.dx * carVelocity.dx +
-                carVelocity.dy * carVelocity.dy
-            ) / 2
-        )
+    private func updateLapProgress() {
+        let dx = (carPosition.x - trackCenter.x) / max(trackRadiusX, 1)
+        let dy = (carPosition.y - trackCenter.y) / max(trackRadiusY, 1)
 
-        speedLabel?.text = "SPEED \(speed)"
-        lapLabel?.text = "LAP \(lapCount) / 3"
-    }
+        let angle = atan2(dy, dx)
 
-    private func updateLaps() {
-        let checkpointY = trackCenter.y + trackRadiusY - 15
+        if let previous = previousTrackAngle {
+            var difference = angle - previous
 
-        if carPosition.y > checkpointY &&
-            lastCheckpointY <= checkpointY &&
-            carPosition.x > trackCenter.x - 45 &&
-            carPosition.x < trackCenter.x + 45 {
+            if difference < -.pi {
+                difference += .pi * 2
+            } else if difference > .pi {
+                difference -= .pi * 2
+            }
 
-            lapCount += 1
+            completedTrackAngle += difference
 
-            if lapCount >= 3 {
-                finishRace()
+            if completedTrackAngle >= .pi * 2 {
+                completedTrackAngle -= .pi * 2
+                lapCount += 1
+
+                if lapCount >= 3 {
+                    finishRace()
+                }
             }
         }
 
-        lastCheckpointY = carPosition.y
+        previousTrackAngle = angle
     }
+
+    private func updateHUD() {
+        let speed = sqrt(
+            carVelocity.dx * carVelocity.dx +
+            carVelocity.dy * carVelocity.dy
+        )
+
+        speedLabel?.text = "SPEED \(Int(speed / 2))"
+        lapLabel?.text = "LAP \(lapCount) / 3"
+    }
+
+    // MARK: Finish
 
     private func finishRace() {
         raceStarted = false
         carVelocity = .zero
 
-        let result = makeLabel(
-            text: "YOU FINISHED!",
-            size: min(size.width * 0.07, 38),
-            color: .systemYellow
-        )
+        let overlay = SKNode()
+        overlay.name = "finishOverlay"
+        overlay.zPosition = 100
 
-        result.position = CGPoint(
+        let title = makeLabel(
+            "YOU FINISHED!",
+            size: min(size.width * 0.065, 38),
+            color: .yellow
+        )
+        title.position = CGPoint(
             x: size.width / 2,
             y: size.height / 2
         )
+        overlay.addChild(title)
 
-        result.zPosition = 100
-        addChild(result)
-
-        let menu = makeLabel(
-            text: "TAP MENU TO RETURN",
-            size: 14,
-            color: .white
+        let instruction = makeLabel(
+            "TAP MENU TO RETURN",
+            size: 13
         )
-
-        menu.position = CGPoint(
+        instruction.position = CGPoint(
             x: size.width / 2,
-            y: size.height / 2 - 45
+            y: size.height / 2 - 40
         )
+        overlay.addChild(instruction)
 
-        menu.zPosition = 100
-        addChild(menu)
-
-        let back = makeLabel(
-            text: "MENU",
-            size: 12,
-            color: .white
-        )
-
-        back.name = "back"
-        back.position = CGPoint(
-            x: size.width / 2,
-            y: size.height - 30
-        )
-
-        addChild(back)
+        addChild(overlay)
     }
 
-    // MARK: - Multiplayer callbacks
+    // MARK: Multiplayer
 
     func multiplayerPeerChanged() {
-        let count = multiplayer.connectedPlayers().count + 1
+        let players = multiplayer.connectedPlayers()
+        statusLabel?.text = "\(players.count + 1) PLAYER(S) CONNECTED"
 
-        statusLabel?.text = "\(count) PLAYER(S) CONNECTED"
+        let colors: [UIColor] = [.red, .yellow, .purple]
 
-        for (index, name) in multiplayer.connectedPlayers().enumerated() {
+        for (index, name) in players.enumerated() {
             if remoteCars[name] == nil {
-                let colors: [UIColor] = [
-                    .systemRed,
-                    .systemYellow,
-                    .systemPurple
-                ]
-
-                let car = RacingCar(
-                    color: colors[index % colors.count]
-                )
-
+                let car = RacingCar(color: colors[index % colors.count])
                 car.zPosition = 5
                 remoteCars[name] = car
                 addChild(car)
@@ -795,33 +808,19 @@ final class GameScene: SKScene, MultiplayerManagerDelegate {
         y: CGFloat,
         angle: CGFloat
     ) {
-        guard mode == .online else {
-            return
-        }
+        guard mode == .online else { return }
 
         if remoteCars[player] == nil {
-            let car = RacingCar(color: .systemRed)
+            let car = RacingCar(color: .red)
+            car.zPosition = 5
             remoteCars[player] = car
             addChild(car)
         }
 
-        remoteCars[player]?.position = CGPoint(x: x, y: y)
+        remoteCars[player]?.position = CGPoint(
+            x: x * size.width,
+            y: y * size.height
+        )
         remoteCars[player]?.zRotation = angle
-    }
-
-    // MARK: - Helpers
-
-    private func makeLabel(
-        text: String,
-        size: CGFloat,
-        color: UIColor
-    ) -> SKLabelNode {
-        let label = SKLabelNode(fontNamed: "AvenirNext-Bold")
-        label.text = text
-        label.fontSize = size
-        label.fontColor = color
-        label.verticalAlignmentMode = .center
-        label.horizontalAlignmentMode = .center
-        return label
     }
 }

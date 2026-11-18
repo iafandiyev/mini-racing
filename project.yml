@@ -1,3 +1,4 @@
+
 name: MiniRacing
 
 options:
@@ -18,7 +19,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ismayil.miniracing
-        PRODUCT_NAME: Mini Racing
+        PRODUCT_NAME: MiniRacing
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1"
         IPHONEOS_DEPLOYMENT_TARGET: "12.0"

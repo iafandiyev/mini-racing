@@ -1,8 +1,10 @@
+
 import UIKit
 import MultipeerConnectivity
 
 protocol MultiplayerManagerDelegate: AnyObject {
     func multiplayerPeerChanged()
+
     func multiplayerReceivedPosition(
         from player: String,
         x: CGFloat,
@@ -11,7 +13,7 @@ protocol MultiplayerManagerDelegate: AnyObject {
     )
 }
 
-class MultiplayerManager: NSObject {
+final class MultiplayerManager: NSObject {
 
     static let shared = MultiplayerManager()
 
@@ -19,13 +21,17 @@ class MultiplayerManager: NSObject {
 
     private let serviceType = "minirace"
 
-    private let peerID = MCPeerID(
+    private lazy var peerID = MCPeerID(
         displayName: UIDevice.current.name
     )
 
     private var session: MCSession!
     private var advertiser: MCNearbyServiceAdvertiser?
     private var browser: MCNearbyServiceBrowser?
+
+    private var invitedPeers = Set<MCPeerID>()
+
+    private var isHost = false
 
     private override init() {
         super.init()
@@ -39,32 +45,50 @@ class MultiplayerManager: NSObject {
         session.delegate = self
     }
 
-    func startHosting() {
-        stopDiscovery()
+    // MARK: - HOST
 
-        advertiser = MCNearbyServiceAdvertiser(
+    func startHosting() {
+        disconnectDiscoveryOnly()
+
+        isHost = true
+        invitedPeers.removeAll()
+
+        let newAdvertiser = MCNearbyServiceAdvertiser(
             peer: peerID,
             discoveryInfo: ["game": "MiniRacing"],
             serviceType: serviceType
         )
 
-        advertiser?.delegate = self
-        advertiser?.startAdvertisingPeer()
+        newAdvertiser.delegate = self
+        advertiser = newAdvertiser
+        newAdvertiser.startAdvertisingPeer()
     }
 
-    func startJoining() {
-        stopDiscovery()
+    // MARK: - JOIN
 
-        browser = MCNearbyServiceBrowser(
+    func startJoining() {
+        disconnectDiscoveryOnly()
+
+        isHost = false
+        invitedPeers.removeAll()
+
+        let newBrowser = MCNearbyServiceBrowser(
             peer: peerID,
             serviceType: serviceType
         )
 
-        browser?.delegate = self
-        browser?.startBrowsingForPeers()
+        newBrowser.delegate = self
+        browser = newBrowser
+        newBrowser.startBrowsingForPeers()
     }
 
+    // MARK: - DISCOVERY
+
     func stopDiscovery() {
+        disconnectDiscoveryOnly()
+    }
+
+    private func disconnectDiscoveryOnly() {
         advertiser?.stopAdvertisingPeer()
         browser?.stopBrowsingForPeers()
 
@@ -72,24 +96,48 @@ class MultiplayerManager: NSObject {
         browser = nil
     }
 
+    // MARK: - DISCONNECT
+
     func disconnect() {
-        stopDiscovery()
+        disconnectDiscoveryOnly()
+
+        invitedPeers.removeAll()
         session.disconnect()
+
+        DispatchQueue.main.async {
+            self.delegate?.multiplayerPeerChanged()
+        }
     }
+
+    // MARK: - PLAYERS
 
     func connectedPlayers() -> [String] {
-        return session.connectedPeers.map { $0.displayName }
+        return session.connectedPeers.map {
+            $0.displayName
+        }
     }
 
-    func sendPosition(x: CGFloat, y: CGFloat, angle: CGFloat) {
+    var playerCount: Int {
+        return session.connectedPeers.count + 1
+    }
+
+    // MARK: - SEND POSITION
+
+    func sendPosition(
+        x: CGFloat,
+        y: CGFloat,
+        angle: CGFloat
+    ) {
         guard !session.connectedPeers.isEmpty else {
             return
         }
 
         let packet: [String: Any] = [
+            "type": "position",
             "x": Double(x),
             "y": Double(y),
-            "angle": Double(angle)
+            "angle": Double(angle),
+            "player": peerID.displayName
         ]
 
         guard let data = try? JSONSerialization.data(
@@ -106,10 +154,99 @@ class MultiplayerManager: NSObject {
                 with: .unreliable
             )
         } catch {
-            print("Send error: \(error.localizedDescription)")
+            print("Position send error: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - SEND RELIABLE MESSAGE
+
+    func sendMessage(_ message: String) {
+        guard !session.connectedPeers.isEmpty else {
+            return
+        }
+
+        let packet: [String: Any] = [
+            "type": "message",
+            "text": message,
+            "player": peerID.displayName
+        ]
+
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: packet,
+            options: []
+        ) else {
+            return
+        }
+
+        do {
+            try session.send(
+                data,
+                toPeers: session.connectedPeers,
+                with: .reliable
+            )
+        } catch {
+            print("Message send error: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - RECEIVE PACKET
+
+    private func handleReceivedPacket(
+        _ data: Data,
+        from peer: MCPeerID,
+        in session: MCSession
+    ) {
+        guard
+            let packet = try? JSONSerialization.jsonObject(
+                with: data,
+                options: []
+            ) as? [String: Any],
+            let type = packet["type"] as? String
+        else {
+            return
+        }
+
+        if type == "position" {
+            guard
+                let x = packet["x"] as? Double,
+                let y = packet["y"] as? Double,
+                let angle = packet["angle"] as? Double
+            else {
+                return
+            }
+
+            // Host forwards the position to the remaining players.
+            if isHost {
+                let otherPeers = session.connectedPeers.filter {
+                    $0 != peer
+                }
+
+                if !otherPeers.isEmpty {
+                    do {
+                        try session.send(
+                            data,
+                            toPeers: otherPeers,
+                            with: .unreliable
+                        )
+                    } catch {
+                        print("Relay error: \(error.localizedDescription)")
+                    }
+                }
+            }
+
+            DispatchQueue.main.async {
+                self.delegate?.multiplayerReceivedPosition(
+                    from: peer.displayName,
+                    x: CGFloat(x),
+                    y: CGFloat(y),
+                    angle: CGFloat(angle)
+                )
+            }
         }
     }
 }
+
+// MARK: - MCSessionDelegate
 
 extension MultiplayerManager: MCSessionDelegate {
 
@@ -121,6 +258,20 @@ extension MultiplayerManager: MCSessionDelegate {
         DispatchQueue.main.async {
             self.delegate?.multiplayerPeerChanged()
         }
+
+        switch state {
+        case .connected:
+            print("Connected: \(peerID.displayName)")
+
+        case .connecting:
+            print("Connecting: \(peerID.displayName)")
+
+        case .notConnected:
+            print("Disconnected: \(peerID.displayName)")
+
+        @unknown default:
+            print("Unknown peer state")
+        }
     }
 
     func session(
@@ -128,26 +279,11 @@ extension MultiplayerManager: MCSessionDelegate {
         didReceive data: Data,
         fromPeer peerID: MCPeerID
     ) {
-        guard
-            let packet = try? JSONSerialization.jsonObject(
-                with: data,
-                options: []
-            ) as? [String: Any],
-            let x = packet["x"] as? Double,
-            let y = packet["y"] as? Double,
-            let angle = packet["angle"] as? Double
-        else {
-            return
-        }
-
-        DispatchQueue.main.async {
-            self.delegate?.multiplayerReceivedPosition(
-                from: peerID.displayName,
-                x: CGFloat(x),
-                y: CGFloat(y),
-                angle: CGFloat(angle)
-            )
-        }
+        handleReceivedPacket(
+            data,
+            from: peerID,
+            in: session
+        )
     }
 
     func session(
@@ -167,11 +303,22 @@ extension MultiplayerManager: MCSessionDelegate {
     func session(
         _ session: MCSession,
         didFinishReceivingResourceWithName resourceName: String,
-        fromPeer peerID: MCPeerID,
+        from peerID: MCPeerID,
         at localURL: URL?,
         withError error: Error?
     ) {}
+
+    func session(
+        _ session: MCSession,
+        didReceive certificate: [Any]?,
+        fromPeer peerID: MCPeerID,
+        certificateHandler: @escaping (Bool) -> Void
+    ) {
+        certificateHandler(true)
+    }
 }
+
+// MARK: - MCNearbyServiceAdvertiserDelegate
 
 extension MultiplayerManager: MCNearbyServiceAdvertiserDelegate {
 
@@ -181,9 +328,23 @@ extension MultiplayerManager: MCNearbyServiceAdvertiserDelegate {
         withContext context: Data?,
         invitationHandler: @escaping (Bool, MCSession?) -> Void
     ) {
-        invitationHandler(true, session)
+        let canAccept = session.connectedPeers.count < 3
+
+        invitationHandler(
+            canAccept,
+            canAccept ? session : nil
+        )
+    }
+
+    func advertiser(
+        _ advertiser: MCNearbyServiceAdvertiser,
+        didNotStartAdvertisingPeer error: Error
+    ) {
+        print("Advertising error: \(error.localizedDescription)")
     }
 }
+
+// MARK: - MCNearbyServiceBrowserDelegate
 
 extension MultiplayerManager: MCNearbyServiceBrowserDelegate {
 
@@ -192,20 +353,39 @@ extension MultiplayerManager: MCNearbyServiceBrowserDelegate {
         foundPeer peerID: MCPeerID,
         withDiscoveryInfo info: [String: String]?
     ) {
-        guard session.connectedPeers.count < 3 else {
+        guard session.connectedPeers.isEmpty else {
             return
         }
+
+        guard !invitedPeers.contains(peerID) else {
+            return
+        }
+
+        guard info?["game"] == "MiniRacing" else {
+            return
+        }
+
+        invitedPeers.insert(peerID)
 
         browser.invitePeer(
             peerID,
             to: session,
             withContext: nil,
-            timeout: 15
+            timeout: 20
         )
     }
 
     func browser(
         _ browser: MCNearbyServiceBrowser,
         lostPeer peerID: MCPeerID
-    ) {}
+    ) {
+        invitedPeers.remove(peerID)
+    }
+
+    func browser(
+        _ browser: MCNearbyServiceBrowser,
+        didNotStartBrowsingForPeers error: Error
+    ) {
+        print("Browsing error: \(error.localizedDescription)")
+    }
 }
