@@ -30,7 +30,6 @@ final class MultiplayerManager: NSObject {
     private var browser: MCNearbyServiceBrowser?
 
     private var invitedPeers = Set<MCPeerID>()
-
     private var isHost = false
 
     private override init() {
@@ -48,7 +47,7 @@ final class MultiplayerManager: NSObject {
     // MARK: - HOST
 
     func startHosting() {
-        disconnectDiscoveryOnly()
+        stopDiscovery()
 
         isHost = true
         invitedPeers.removeAll()
@@ -67,7 +66,7 @@ final class MultiplayerManager: NSObject {
     // MARK: - JOIN
 
     func startJoining() {
-        disconnectDiscoveryOnly()
+        stopDiscovery()
 
         isHost = false
         invitedPeers.removeAll()
@@ -85,10 +84,6 @@ final class MultiplayerManager: NSObject {
     // MARK: - DISCOVERY
 
     func stopDiscovery() {
-        disconnectDiscoveryOnly()
-    }
-
-    private func disconnectDiscoveryOnly() {
         advertiser?.stopAdvertisingPeer()
         browser?.stopBrowsingForPeers()
 
@@ -99,7 +94,7 @@ final class MultiplayerManager: NSObject {
     // MARK: - DISCONNECT
 
     func disconnect() {
-        disconnectDiscoveryOnly()
+        stopDiscovery()
 
         invitedPeers.removeAll()
         session.disconnect()
@@ -158,7 +153,7 @@ final class MultiplayerManager: NSObject {
         }
     }
 
-    // MARK: - SEND RELIABLE MESSAGE
+    // MARK: - SEND MESSAGE
 
     func sendMessage(_ message: String) {
         guard !session.connectedPeers.isEmpty else {
@@ -207,6 +202,7 @@ final class MultiplayerManager: NSObject {
         }
 
         if type == "position" {
+
             guard
                 let x = packet["x"] as? Double,
                 let y = packet["y"] as? Double,
@@ -215,7 +211,9 @@ final class MultiplayerManager: NSObject {
                 return
             }
 
-            // Host forwards the position to the remaining players.
+            let playerName = peer.displayName
+
+            // Host forwards received positions to other players.
             if isHost {
                 let otherPeers = session.connectedPeers.filter {
                     $0 != peer
@@ -236,7 +234,7 @@ final class MultiplayerManager: NSObject {
 
             DispatchQueue.main.async {
                 self.delegate?.multiplayerReceivedPosition(
-                    from: peer.displayName,
+                    from: playerName,
                     x: CGFloat(x),
                     y: CGFloat(y),
                     angle: CGFloat(angle)
@@ -303,7 +301,7 @@ extension MultiplayerManager: MCSessionDelegate {
     func session(
         _ session: MCSession,
         didFinishReceivingResourceWithName resourceName: String,
-        from peerID: MCPeerID,
+        fromPeer peerID: MCPeerID,
         at localURL: URL?,
         withError error: Error?
     ) {}
@@ -353,7 +351,7 @@ extension MultiplayerManager: MCNearbyServiceBrowserDelegate {
         foundPeer peerID: MCPeerID,
         withDiscoveryInfo info: [String: String]?
     ) {
-        guard session.connectedPeers.isEmpty else {
+        guard session.connectedPeers.count < 1 else {
             return
         }
 
