@@ -14,7 +14,7 @@ permissions:
 jobs:
   build:
     name: Build iOS IPA
-    runs-on: macos-latest
+    runs-on: macos-15
     timeout-minutes: 45
 
     steps:
