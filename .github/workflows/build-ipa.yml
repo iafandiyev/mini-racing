@@ -13,27 +13,35 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-14
-    timeout-minutes: 30
+    name: Build iOS IPA
+    runs-on: macos-latest
+    timeout-minutes: 45
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Show Xcode version
+      - name: Select Xcode
         run: |
-          xcode-select -p
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
           xcodebuild -version
 
       - name: Install XcodeGen
         run: |
           brew install xcodegen
-          xcodegen --version
+
+      - name: Check project files
+        run: |
+          test -f project.yml
+          test -f MiniRacing/Info.plist
+          test -f MiniRacing/GameScene.swift
+          test -f MiniRacing/MultiplayerManager.swift
 
       - name: Generate Xcode project
-        run: xcodegen generate
+        run: |
+          xcodegen generate
 
-      - name: Build iOS app
+      - name: Build iOS application
         run: |
           xcodebuild \
             -project MiniRacing.xcodeproj \
@@ -44,34 +52,21 @@ jobs:
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_IDENTITY="" \
             build
 
       - name: Verify application
         run: |
           APP_PATH="build/Build/Products/Release-iphoneos/MiniRacing.app"
+          test -d "$APP_PATH"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP_PATH/Info.plist"
 
-          if [ ! -d "$APP_PATH" ]; then
-            echo "ERROR: MiniRacing.app was not created."
-            find build/Build/Products -maxdepth 4 -print || true
-            exit 1
-          fi
-
-          echo "Application found:"
-          ls -la "$APP_PATH"
-
-      - name: Package IPA
+      - name: Create IPA
         run: |
-          rm -rf Payload MiniRacing.ipa
-          mkdir Payload
-
-          cp -R \
-            build/Build/Products/Release-iphoneos/MiniRacing.app \
-            Payload/
-
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/MiniRacing.app Payload/
           /usr/bin/zip -r MiniRacing.ipa Payload
-
           test -f MiniRacing.ipa
-          unzip -l MiniRacing.ipa
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
